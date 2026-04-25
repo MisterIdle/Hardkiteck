@@ -94,7 +94,7 @@ namespace Hardkiteck
 
         public static void ApplyPrices()
         {
-            if (!Hardkiteck.IsActive) return;
+            if (!Hardkiteck.IsModActiveGlobally) return;
 
             float multiplier = Hardkiteck.Settings.AttractionPriceMultiplier;
 
@@ -134,7 +134,44 @@ namespace Hardkiteck
     {
         public const string ModId = "misteridle.harditeck";
         public static readonly HardkiteckSettings Settings = new HardkiteckSettings();
+
         public static bool IsActive { get; private set; } = false;
+
+        private static Harmony _harmony;
+        public const string SplashTag = "<color=#F2CC4C>Hardkiteck Mode</color>\n";
+
+        private static bool _cachedGloballyEnabled = false;
+        private static float _lastCacheCheck = -1f;
+
+        public static bool IsModActiveGlobally
+        {
+            get
+            {
+                if (IsActive) return true;
+
+                if (Time.unscaledTime - _lastCacheCheck > 0.5f)
+                {
+                    _lastCacheCheck = Time.unscaledTime;
+                    _cachedGloballyEnabled = false;
+                    try
+                    {
+                        if (ModManager.Instance != null)
+                        {
+                            foreach (var entry in ModManager.Instance.getModEntries())
+                            {
+                                if (entry.mod != null && entry.mod.getIdentifier() == ModId)
+                                {
+                                    _cachedGloballyEnabled = entry.isActive();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                return _cachedGloballyEnabled;
+            }
+        }
 
         public override string getName() => "Hardkiteck";
         public override string getDescription() => "Hardcore mode for Parkitect";
@@ -145,17 +182,26 @@ namespace Hardkiteck
 
         static Hardkiteck()
         {
-            IsActive = true;
-            Settings.Load();
-
             try
             {
-                new Harmony(ModId).PatchAll();
+                if (_harmony == null) _harmony = new Harmony(ModId);
+                _harmony.PatchAll();
             }
             catch (Exception e)
             {
                 Debug.LogError($"[Hardkiteck] Harmony patch failed: {e.Message}");
             }
+        }
+
+        public override void onEnabled()
+        {
+            IsActive = true;
+            Settings.Load();
+        }
+
+        public override void onDisabled()
+        {
+            IsActive = false;
         }
 
         public void onSettingsOpened() => Settings.Load();
@@ -174,6 +220,7 @@ namespace Hardkiteck
         public void onDrawSettingsUI()
         {
             DrawButton("Reset to Defaults", ResetSettings);
+            DrawDifficultyHint();
 
             DrawSectionHeader("ECONOMY", ColorEconomy);
             Settings.MoneyMultiplier = DrawStepper("Starting Money", Settings.MoneyMultiplier, 0.1f, 3.0f, 0.05f);
@@ -238,8 +285,7 @@ namespace Hardkiteck
             string label;
             Color color;
 
-            if (isEasy && isHard)
-            { label = "⚡ Mixed"; color = ColorEconomy; }
+            if (isEasy && isHard) { label = "🗲 Mixed"; color = ColorEconomy; }
             else if (isEasy) { label = "✔ Easy"; color = ColorGuests; }
             else if (isHard) { label = "☠ Hardcore"; color = ColorChallenge; }
             else { label = "◆ Vanilla"; color = ColorDefault; }
@@ -305,7 +351,7 @@ namespace Hardkiteck
     {
         static void Postfix(Park __instance)
         {
-            if (!Hardkiteck.IsActive) return;
+            if (!Hardkiteck.IsModActiveGlobally) return;
 
             var s = Hardkiteck.Settings;
             var parkInfo = __instance.parkInfo;
@@ -338,7 +384,7 @@ namespace Hardkiteck
     {
         static void Postfix(ref int __result)
         {
-            if (Hardkiteck.IsActive)
+            if (Hardkiteck.IsModActiveGlobally)
                 __result = (int)(__result * Hardkiteck.Settings.GoalMultiplier);
         }
     }
@@ -352,7 +398,7 @@ namespace Hardkiteck
 
         static void Postfix(GoalsController __instance)
         {
-            if (!Hardkiteck.IsActive)
+            if (!Hardkiteck.IsModActiveGlobally)
                 return;
 
             var goals = Traverse.Create(__instance).Field("goals").GetValue<IList>();
@@ -420,16 +466,14 @@ namespace Hardkiteck
         public static string Process(string input)
         {
             if (string.IsNullOrEmpty(input) || input.Contains(ProcessedMarker)) return input;
-            if (!Hardkiteck.IsActive) return input;
+            if (!Hardkiteck.IsModActiveGlobally) return input;
 
             return NumberRegex.Replace(input, match =>
             {
                 string digits = match.Value.Replace(" ", "").Replace("\u00A0", "");
                 if (long.TryParse(digits, out long number) && number >= 100)
                 {
-                    return number
-                        .ToString("#,##0")
-                        .Replace(",", " ");
+                    return number.ToString("#,##0").Replace(",", " ");
                 }
                 return match.Value;
             }) + ProcessedMarker;
@@ -467,12 +511,8 @@ namespace Hardkiteck
     {
         static void Postfix(ScenarioMarkerTooltip __instance)
         {
-            var desc = Traverse.Create(__instance)
-                .Field("scenarioDescriptionText")
-                .GetValue<TextMeshProUGUI>();
-
-            if (desc != null)
-                desc.text = HardcoreProcessor.Process(desc.text);
+            var desc = Traverse.Create(__instance).Field("scenarioDescriptionText").GetValue<TextMeshProUGUI>();
+            if (desc != null) desc.text = HardcoreProcessor.Process(desc.text);
         }
     }
 
@@ -481,7 +521,7 @@ namespace Hardkiteck
     {
         static void Postfix(GoalsController __instance, ref string __result)
         {
-            if (!Hardkiteck.IsActive) return;
+            if (!Hardkiteck.IsModActiveGlobally) return;
 
             AppendGoalDescriptionIfNeeded(__instance, ref __result, "NoTrackedRideBlueprintsGoal", Hardkiteck.Settings.ForceNoBlueprintGoal);
             AppendGoalDescriptionIfNeeded(__instance, ref __result, "WinWithoutPausingGoal", Hardkiteck.Settings.ForceNoPauseGoal);
