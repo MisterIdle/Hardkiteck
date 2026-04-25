@@ -4,6 +4,7 @@ using Parkitect.UI;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using TMPro;
 using UnityEngine;
@@ -138,7 +139,6 @@ namespace Hardkiteck
         public static bool IsActive { get; private set; } = false;
 
         private static Harmony _harmony;
-        public const string SplashTag = "<color=#F2CC4C>Hardkiteck Mode</color>\n";
 
         private static bool _cachedGloballyEnabled = false;
         private static float _lastCacheCheck = -1f;
@@ -262,30 +262,30 @@ namespace Hardkiteck
 
         private void DrawDifficultyHint()
         {
-            var settings = Settings;
+            var s = Settings;
 
-            bool isEasy = settings.MoneyMultiplier > 1.0f
-                       || settings.AttractionPriceMultiplier < 1.0f
-                       || settings.TerraformingMultiplier < 1.0f
-                       || settings.MaxGuestsMultiplier > 1.0f
-                       || settings.HappinessMultiplier > 1.0f
-                       || settings.HungerMultiplier < 1.0f
-                       || settings.RollingResistanceMultiplier < 1.0f
-                       || settings.GoalMultiplier < 1.0f;
+            bool isEasy = s.MoneyMultiplier > 1.0f
+                       || s.AttractionPriceMultiplier < 1.0f
+                       || s.TerraformingMultiplier < 1.0f
+                       || s.MaxGuestsMultiplier > 1.0f
+                       || s.HappinessMultiplier > 1.0f
+                       || s.HungerMultiplier < 1.0f
+                       || s.RollingResistanceMultiplier < 1.0f
+                       || s.GoalMultiplier < 1.0f;
 
-            bool isHard = settings.MoneyMultiplier < 1.0f
-                       || settings.AttractionPriceMultiplier > 1.0f
-                       || settings.TerraformingMultiplier > 1.0f
-                       || settings.MaxGuestsMultiplier < 1.0f
-                       || settings.HappinessMultiplier < 1.0f
-                       || settings.HungerMultiplier > 1.0f
-                       || settings.RollingResistanceMultiplier > 1.0f
-                       || settings.GoalMultiplier > 1.0f;
+            bool isHard = s.MoneyMultiplier < 1.0f
+                       || s.AttractionPriceMultiplier > 1.0f
+                       || s.TerraformingMultiplier > 1.0f
+                       || s.MaxGuestsMultiplier < 1.0f
+                       || s.HappinessMultiplier < 1.0f
+                       || s.HungerMultiplier > 1.0f
+                       || s.RollingResistanceMultiplier > 1.0f
+                       || s.GoalMultiplier > 1.0f;
 
             string label;
             Color color;
 
-            if (isEasy && isHard) { label = "🗲 Mixed"; color = ColorEconomy; }
+            if (isEasy && isHard) { label = "⚡ Mixed"; color = ColorEconomy; }
             else if (isEasy) { label = "✔ Easy"; color = ColorGuests; }
             else if (isHard) { label = "☠ Hardcore"; color = ColorChallenge; }
             else { label = "◆ Vanilla"; color = ColorDefault; }
@@ -406,23 +406,19 @@ namespace Hardkiteck
                 return;
 
             if (Hardkiteck.Settings.ForceNoBlueprintGoal && BlueprintGoalType != null)
-                EnsureGoalMandatory(goals, BlueprintGoalType);
+                EnsureGoalExists(goals, BlueprintGoalType);
 
             if (Hardkiteck.Settings.ForceNoPauseGoal && NoPauseGoalType != null)
-                EnsureGoalMandatory(goals, NoPauseGoalType);
+                EnsureGoalExists(goals, NoPauseGoalType);
 
             if (Hardkiteck.Settings.ForceNoDebtGoal && NoDebtGoalType != null)
-                EnsureGoalMandatory(goals, NoDebtGoalType);
+                EnsureGoalExists(goals, NoDebtGoalType);
         }
 
-        private static void EnsureGoalMandatory(IList goals, Type goalType)
+        private static void EnsureGoalExists(IList goals, Type goalType)
         {
             object existing = FindGoalOfType(goals, goalType);
-            if (existing != null)
-            {
-                SetMandatory(existing);
-            }
-            else
+            if (existing == null)
             {
                 TryAddGoal(goals, goalType);
             }
@@ -435,25 +431,55 @@ namespace Hardkiteck
             return null;
         }
 
-        private static void SetMandatory(object goal)
-        {
-            var node = Traverse.Create(goal);
-            node.Field("isOptional").SetValue(false);
-            node.Property("isOptional").SetValue(false);
-        }
-
         private static void TryAddGoal(IList goals, Type type)
         {
             try
             {
                 var newGoal = Activator.CreateInstance(type);
-                SetMandatory(newGoal);
                 goals.Add(newGoal);
                 AccessTools.Method(type, "initialize")?.Invoke(newGoal, null);
             }
             catch (Exception e)
             {
                 Debug.LogError($"[Hardkiteck] Could not inject goal {type.Name}: {e.Message}");
+            }
+        }
+    }
+
+    [HarmonyPatch]
+    public class ForceMandatoryGoalsPatch
+    {
+        static MethodBase TargetMethod()
+        {
+            Type type = AccessTools.TypeByName("NoTrackedRideBlueprintsGoal");
+            if (type != null)
+            {
+                var prop = AccessTools.Property(type, "isOptional");
+                if (prop != null)
+                {
+                    return prop.GetGetMethod();
+                }
+            }
+            return null;
+        }
+
+        static void Postfix(object __instance, ref bool __result)
+        {
+            if (!Hardkiteck.IsModActiveGlobally) return;
+
+            string goalName = __instance.GetType().Name;
+
+            if (Hardkiteck.Settings.ForceNoBlueprintGoal && goalName == "NoTrackedRideBlueprintsGoal")
+            {
+                __result = false;
+            }
+            else if (Hardkiteck.Settings.ForceNoPauseGoal && goalName == "WinWithoutPausingGoal")
+            {
+                __result = false;
+            }
+            else if (Hardkiteck.Settings.ForceNoDebtGoal && goalName == "NoLoanDebtsGoal")
+            {
+                __result = false;
             }
         }
     }
